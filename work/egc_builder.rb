@@ -7,7 +7,7 @@ require 'extensions.rb'
 module EGC
   PLUGIN_ID      = 'egc_builder'
   PLUGIN_NAME    = 'E.G.C Builder'
-  PLUGIN_VERSION = '1.28.67'
+  PLUGIN_VERSION = '1.28.68'
   PLUGIN_DIR     = File.join(File.dirname(__FILE__), 'egc_builder').freeze
 
   unless file_loaded?(__FILE__)

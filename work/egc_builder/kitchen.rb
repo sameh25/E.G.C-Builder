@@ -21,6 +21,63 @@ module EGC
       false
     end
 
+    # ---- 1.28.68: HARD WORKTOP BARRIER -------------------------------------
+    # A tall tower / pantry / fridge housing / converted column is an impenetrable
+    # wall for the marble: the slab must stop dead at its side gable and resume on
+    # the far side. It may NEVER bridge over the tower's footprint.
+    #
+    # 1.28.67 only removed towers from the list of bases that CARRY a worktop. That
+    # was not enough: the span was then taken as min()/max() across the surviving
+    # bases, so bases on both sides of a tower still produced one slab straight
+    # across it (base 0-600 + tower 600-1200 + base 1200-1800 -> span 0..1800).
+    # The fix is to SPLIT the carrying bases into contiguous runs and cut every run
+    # at a barrier, which is what produces the real butt joint.
+    def worktop_barrier?(g)
+      return false unless g.valid?
+      return true if g.get_attribute(ATTR, 'converted_from_code')
+      return true if g.get_attribute(ATTR, 'kind').to_s == 'tall'
+
+      tall_vote?(g)
+    rescue StandardError
+      false
+    end
+
+    # Split the carrying bases into contiguous groups. A tower standing between two
+    # units leaves a real gap in x, so those two land in DIFFERENT groups and each
+    # group is built as its own slab - which is what gives the clean butt joint at
+    # the tower's side gable. (A filter that merely drops the tower cannot do this:
+    # bases on both sides would still be spanned end to end by one min()/max().)
+    def worktop_runs(bases, tol = 2.0)
+      runs = []
+      cur = []
+      cur_end = nil
+      bases.sort_by { |g| g.transformation.origin.x.to_mm }.each do |g|
+        x0 = g.transformation.origin.x.to_mm
+        x1 = x0 + g.get_attribute(ATTR, 'w').to_f
+        # A GAP (x0 beyond the end already covered) starts a new group; touching or
+        # overlapping units stay together, so two panels sharing a gable never split.
+        if cur.empty? || (x0 - cur_end) > tol
+          runs << cur unless cur.empty?
+          cur = [g]
+          cur_end = x1
+        else
+          cur << g
+          cur_end = x1 if x1 > cur_end
+        end
+      end
+      runs << cur unless cur.empty?
+      runs
+    end
+
+    # [x0, x1] of one contiguous group, in the frame its members live in.
+    def run_span(seg)
+      e = seg.map do |g|
+        x0 = g.transformation.origin.x.to_mm
+        [x0, x0 + g.get_attribute(ATTR, 'w').to_f]
+      end
+      [e.map(&:first).min, e.map(&:last).max]
+    end
+
     def sym(h)
       h.each_with_object({}) { |(k, v), o| o[k.to_sym] = v }
     end
@@ -1665,8 +1722,40 @@ module EGC
       w = ng.get_attribute(ATTR, 'w').to_f
       return unless find_free_wrap(parent_ents, wg, 0.0, w)
 
+      # 1.28.68: the unit was just resized INTO a tower. connected_run now stops at a
+      # barrier, so it returns [] for this unit - and the slab that used to cross it
+      # would be left standing in the wrap, bridging the new tower. Strip the marble
+      # over its footprint and rebuild the chains on each side, so the run
+      # butt-terminates at the tower instead of running over it.
+      if worktop_barrier?(ng)
+        p0 = wg * Geom::Point3d.new(0, 0, 0)
+        p1 = wg * Geom::Point3d.new(Geo.mm(w), 0, 0)
+        wx0, wx1 = [p0.x.to_mm, p1.x.to_mm].minmax
+        strip_top_over_span_world!(parent_ents, wx0, wx1)
+        rebuild_free_chains(parent_ents, cfg)
+        return
+      end
+
       chain = connected_run(ng)
       rebuild_free_worktop(chain, cfg) unless chain.empty?
+    end
+
+    # Rebuild one free-standing slab per remaining base chain, skipping covers already
+    # handled this pass. Shared by the resize-to-tower path and the base -> tall
+    # conversion, so both leave the same clean butt joints.
+    def rebuild_free_chains(parent_ents, cfg)
+      done = []
+      parent_ents.grep(Sketchup::Group).select { |q| q.valid? && base_kind?(q) && !worktop_barrier?(q) }.each do |seed|
+        sx = seed.transformation.origin.x.to_mm
+        next if done.any? { |(a, b)| sx >= a - 1.0 && sx <= b + 1.0 }
+
+        chain = connected_run(seed)
+        next if chain.empty?
+
+        done << [chain.map { |q| q.transformation.origin.x.to_mm }.min,
+                 chain.map { |q| q.transformation.origin.x.to_mm + q.get_attribute(ATTR, 'w').to_f }.max]
+        rebuild_free_worktop(chain, cfg)
+      end
     end
 
     # Any rebuild of a base cabinet inside a generated run (Edit, Replace, style, exp, mechanism...)
@@ -1690,43 +1779,46 @@ module EGC
       return unless run && run.get_attribute(ATTR, 'run')
 
       ents = run.entities
-      bases = ents.grep(Sketchup::Group).select { |g| base_kind?(g) }
-      return if bases.empty?
+      all = ents.grep(Sketchup::Group).select { |g| base_kind?(g) }
+      return if all.empty?
 
       cx0 = cab.transformation.origin.x.to_mm
       cx1 = cx0 + cab.get_attribute(ATTR, 'w').to_f
       tops = ents.grep(Sketchup::Group).select { |g| %w[countertop upstand backsplash].include?(g.get_attribute(ATTR, 'part')) }
-      # 1.28.67: butt-terminate at towers. Anything standing above TALL_VOTE_MM is
-      # dropped from the carrying base list, so the rebuilt span simply stops at
-      # that unit's side gable instead of running across the top of the tower.
-      bases = bases.reject do |g|
-        g.get_attribute(ATTR, 'converted_from_code') ||
-          g.get_attribute(ATTR, 'kind').to_s == 'tall' ||
-          tall_vote?(g)
-      end
-      return if bases.empty?
       lo, hi = grow_to_cover(tops, cx0, cx1)
 
-      span_group = bases.select do |g|
+      # 1.28.68: a tower is not a carrier. Drop it from the list of bases a slab may
+      # rest on, then rebuild ONE SLAB PER CONTIGUOUS GROUP so the marble stops at
+      # the tower's side gable and resumes on the far side.
+      carriers = all.reject { |g| worktop_barrier?(g) }
+      near = carriers.select do |g|
         x0 = g.transformation.origin.x.to_mm
         x1 = x0 + g.get_attribute(ATTR, 'w').to_f
         x0 < hi - 0.5 && x1 > lo + 0.5
-      end.sort_by { |g| g.transformation.origin.x.to_mm }
-      return if span_group.empty?
-
-      start_x = span_group.map { |g| g.transformation.origin.x.to_mm }.min
-      end_x = span_group.map { |g| g.transformation.origin.x.to_mm + g.get_attribute(ATTR, 'w').to_f }.max
-      if (tt = (JSON.parse(run.get_attribute(ATTR, 'top_trim').to_s) rescue nil)) # the corner end of a side run (see build_run top_trim)
-        rl = run.get_attribute(ATTR, 'run_len').to_f
-        start_x += tt[0].to_f if start_x.abs < 0.5
-        end_x -= tt[1].to_f if (end_x - rl).abs < 0.5
       end
-      holes = span_group.filter_map { |g| cutout_for(g, cfg) }
-      top_h = slab_reference_h(span_group, cfg)
-      cuts = span_group[1..].map { |g| g.transformation.origin.x.to_mm }
+
+      # Clear the old marble over the whole affected band first, so a slab left
+      # behind from BEFORE the unit was resized cannot survive as a ghost bridging
+      # the tower (it is one group, so erasing by overlap removes it whole).
+      erase_top_pieces(ents, lo, hi)
+
+      tt = (JSON.parse(run.get_attribute(ATTR, 'top_trim').to_s) rescue nil) # the corner end of a side run (see build_run top_trim)
+      rl = run.get_attribute(ATTR, 'run_len').to_f
       opts = run.get_attribute(ATTR, 'island') ? { back: cfg['island_overhang'].to_f } : {}
-      erase_top_pieces(ents, start_x, end_x)
-      countertop(ents, "#{run.name}_top_r#{start_x.round}", { start: start_x, end: end_x, holes: holes }, cfg.merge('base_h' => top_h), cuts, opts)
+      worktop_runs(near).each_with_index do |seg, i|
+        start_x, end_x = run_span(seg)
+        if tt
+          start_x += tt[0].to_f if start_x.abs < 0.5
+          end_x -= tt[1].to_f if (end_x - rl).abs < 0.5
+        end
+        next if end_x - start_x < 1
+
+        holes = seg.filter_map { |g| cutout_for(g, cfg) }
+        top_h = slab_reference_h(seg, cfg)
+        cuts = seg[1..].map { |g| g.transformation.origin.x.to_mm }
+        countertop(ents, "#{run.name}_top_r#{start_x.round}#{i.zero? ? '' : "_#{i}"}",
+                   { start: start_x, end: end_x, holes: holes }, cfg.merge('base_h' => top_h), cuts, opts)
+      end
     end
 
     def grow_to_cover(tops, lo, hi)
@@ -1888,7 +1980,12 @@ module EGC
     def rebuild_run_tops(run, cfg)
       ents = run.entities
       bases = ents.grep(Sketchup::Group).select { |g| base_kind?(g) }.sort_by { |g| g.transformation.origin.x.to_mm }
-      bases.each { |b| rebuild_local_countertop(b, cfg) if b.valid? }
+      # 1.28.68: rebuild_local_countertop now rebuilds EVERY contiguous segment in the
+      # affected band (that is what splits the marble at the towers), so one call covers
+      # the whole run. Calling it per base would erase and rebuild every segment N times
+      # over (O(n^2)) and gain nothing.
+      first = bases.find(&:valid?)
+      rebuild_local_countertop(first, cfg) if first
       bases.each do |g|
         next unless g.valid?
 
@@ -1949,10 +2046,16 @@ module EGC
     # worktop shape is special-cased, so it is never silently absorbed into a straight slab).
     def connected_run(seed)
       return [] unless seed && base_kind?(seed)
+      # 1.28.68: a tower is the end of a base chain, never a link in it. Without this a
+      # resized base (kind still 'base', h = 2300) would chain its two neighbours
+      # together THROUGH itself, and the slab would be spanned across its footprint.
+      return [] if worktop_barrier?(seed)
       return [seed] if corner_unit?(seed)
 
       parent_ents = seed.parent.respond_to?(:entities) ? seed.parent.entities : Sketchup.active_model.entities
-      pool = parent_ents.grep(Sketchup::Group).select { |g| g.valid? && g != seed && base_kind?(g) && !corner_unit?(g) }
+      pool = parent_ents.grep(Sketchup::Group).select do |g|
+        g.valid? && g != seed && base_kind?(g) && !corner_unit?(g) && !worktop_barrier?(g)
+      end
       chain = [seed]
       loop do
         grew = false
@@ -2041,15 +2144,40 @@ module EGC
         { g: g, x0: x0, x1: x0 + ow }
       end.sort_by { |mm| mm[:x0] }
 
+      # 1.28.68: the same hard barrier as the run path. `chain` normally excludes
+      # towers already (connected_run stops at them), but a segment may still be
+      # handed in across a gap - so split on real gaps and give each group its own
+      # slab. One wrapper group holds every piece, exactly like a run holds its tops.
+      segs = []
+      cur = []
+      cur_end = nil
+      members.each do |mm|
+        if cur.empty? || (mm[:x0] - cur_end) > 2.0
+          segs << cur unless cur.empty?
+          cur = [mm]
+          cur_end = mm[:x1]
+        else
+          cur << mm
+          cur_end = mm[:x1] if mm[:x1] > cur_end
+        end
+      end
+      segs << cur unless cur.empty?
+
       start_x = members.map { |mm| mm[:x0] }.min
       end_x = members.map { |mm| mm[:x1] }.max
-      holes = members.filter_map { |mm| cutout_for_at(mm[:g], mm[:x0], cfg) }
-      top_h = slab_reference_h(members.map { |mm| mm[:g] }, cfg)
-      cuts = members[1..].map { |mm| mm[:x0] }
-
       wrap = find_free_wrap(parent_ents, wg, start_x, end_x) || new_free_wrap(parent_ents, seed)
       erase_top_pieces(wrap.entities, start_x, end_x)
-      countertop(wrap.entities, "#{wrap.name}_top_r#{start_x.round}", { start: start_x, end: end_x, holes: holes }, cfg.merge('base_h' => top_h), cuts)
+      segs.each_with_index do |seg, i|
+        s_x = seg.map { |mm| mm[:x0] }.min
+        e_x = seg.map { |mm| mm[:x1] }.max
+        next if e_x - s_x < 1
+
+        holes = seg.filter_map { |mm| cutout_for_at(mm[:g], mm[:x0], cfg) }
+        top_h = slab_reference_h(seg.map { |mm| mm[:g] }, cfg)
+        cuts = seg[1..].map { |mm| mm[:x0] }
+        countertop(wrap.entities, "#{wrap.name}_top_r#{s_x.round}#{i.zero? ? '' : "_#{i}"}",
+                   { start: s_x, end: e_x, holes: holes }, cfg.merge('base_h' => top_h), cuts)
+      end
       wrap
     end
 
