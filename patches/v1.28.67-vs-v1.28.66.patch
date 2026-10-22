@@ -1,0 +1,229 @@
+--- a/egc_builder.rb
++++ b/egc_builder.rb
+@@ -7,7 +7,7 @@
+ module EGC
+   PLUGIN_ID      = 'egc_builder'
+   PLUGIN_NAME    = 'E.G.C Builder'
+-  PLUGIN_VERSION = '1.28.66'
++  PLUGIN_VERSION = '1.28.67'
+   PLUGIN_DIR     = File.join(File.dirname(__FILE__), 'egc_builder').freeze
+ 
+   unless file_loaded?(__FILE__)
+--- a/egc_builder/kitchen.rb
++++ b/egc_builder/kitchen.rb
+@@ -5,8 +5,22 @@
+ module EGC
+   module Kitchen
+     ATTR = 'egc'
++    # A unit taller than this is a tower / full-height column, whatever its stored spec
++    # still says. It must never carry a worktop and never vote on the slab height.
++    TALL_VOTE_MM = 1100.0
+     module_function
+ 
++    # True when a unit stands taller than a base run even though its spec may still
++    # read kind == :base (a base edited in place up to 2300 mm keeps kind 'base').
++    def tall_vote?(g)
++      return false unless g.valid?
++
++      h = g.get_attribute(ATTR, 'h').to_f
++      h > TALL_VOTE_MM || g.get_attribute(ATTR, 'kind').to_s == 'tall'
++    rescue StandardError
++      false
++    end
++
+     def sym(h)
+       h.each_with_object({}) { |(k, v), o| o[k.to_sym] = v }
+     end
+@@ -1575,6 +1589,16 @@
+         owner = find_owner_group(ng)
+         RowEdit.capture(owner, cfg) if owner && owner.get_attribute(ATTR, 'run')
+       end
++      # 1.28.67: this rebuild just rewrote the unit and every part dictionary
++      # through Panel.add, so every production number derived from them is now
++      # stale - advance the cutlist generation so exports re-read the model.
++      # Guarded: a resize must never fail because a production module is absent
++      # (Cutlist is not required by every entry point).
++      begin
++        EGC::Cutlist.invalidate_cache! if defined?(EGC::Cutlist) && EGC::Cutlist.respond_to?(:invalidate_cache!)
++      rescue StandardError
++        nil
++      end
+       model.commit_operation if manage_operation
+       ng
+     rescue StandardError
+@@ -1672,7 +1696,14 @@
+       cx0 = cab.transformation.origin.x.to_mm
+       cx1 = cx0 + cab.get_attribute(ATTR, 'w').to_f
+       tops = ents.grep(Sketchup::Group).select { |g| %w[countertop upstand backsplash].include?(g.get_attribute(ATTR, 'part')) }
+-      bases = bases.reject { |g| g.get_attribute(ATTR, 'converted_from_code') || g.get_attribute(ATTR, 'kind').to_s == 'tall' }
++      # 1.28.67: butt-terminate at towers. Anything standing above TALL_VOTE_MM is
++      # dropped from the carrying base list, so the rebuilt span simply stops at
++      # that unit's side gable instead of running across the top of the tower.
++      bases = bases.reject do |g|
++        g.get_attribute(ATTR, 'converted_from_code') ||
++          g.get_attribute(ATTR, 'kind').to_s == 'tall' ||
++          tall_vote?(g)
++      end
+       return if bases.empty?
+       lo, hi = grow_to_cover(tops, cx0, cx1)
+ 
+@@ -1797,12 +1828,21 @@
+     def slab_reference_h(groups, cfg)
+       # Tower / converted-to-tall units must NEVER vote on slab height; otherwise a
+       # base unit just converted to tall lifts the marble to ~2700 mm.
++      #
++      # 1.28.67: the stored kind is NOT sufficient. A base unit resized in place to
++      # 2300 mm keeps kind 'base' (rebuild_cabinet only rewrites w/h/d), so it used
++      # to win this max() and drag the whole slab up with it. Anything standing
++      # higher than TALL_VOTE_MM is excluded by HEIGHT as well as by kind.
+       hs = groups.select do |g|
+         g.valid? && base_kind?(g) &&
+           !g.get_attribute(ATTR, 'converted_from_code') &&
+-          g.get_attribute(ATTR, 'kind').to_s != 'tall'
++          g.get_attribute(ATTR, 'kind').to_s != 'tall' &&
++          !tall_vote?(g)
+       end.map { |g| g.get_attribute(ATTR, 'h').to_f }
+-      hs.max.to_f.positive? ? hs.max : cfg['base_h'].to_f
++      # Clamp to the standard counter height: a genuine base carcass that is somehow
++      # stored taller than a counter must not push the plane through the ceiling.
++      h = hs.max.to_f.positive? ? hs.max : cfg['base_h'].to_f
++      [h, cfg['base_h'].to_f].min
+     end
+ 
+     def slab_z(cfg, base_h = nil)
+--- a/egc_builder/cutlist.rb
++++ b/egc_builder/cutlist.rb
+@@ -7,6 +7,20 @@
+     ATTR = 'egc'
+     module_function
+ 
++    # ---- 1.28.67 production sync -------------------------------------------
++    # A dimension edit rebuilds the unit and Panel.add rewrites every part's
++    # 'egc' dictionary, but nothing told the consumers (report / CSV / CAM /
++    # the ProductionModel snapshot) that the numbers they last read are stale.
++    # This generation counter is that signal: it advances on every rebuild, so
++    # an export can compare it and refresh instead of serving old sizes.
++    def generation
++      @generation ||= 0
++    end
++
++    def invalidate_cache!
++      @generation = generation + 1
++    end
++
+     # A panel / unit the user modelled by hand joins production through the SAME
+     # 'egc' attributes every builder part carries - measured from its real
+     # bounding box (sorted so orientation never matters). After this the cut
+@@ -240,7 +254,7 @@
+       plinth_mm = EGC::Num.sum(raw[:parts].select { |p| p[:part].to_s == 'plinth' }) { |p| p[:len] }
+       raw[:hw]['plinth_m'] = plinth_mm / 1000.0 if plinth_mm.positive?
+       rows = aggregate(raw[:parts])
+-      out = { rows: rows, raw: raw[:parts], apps: raw[:apps], cabs: raw[:cabs], hw: raw[:hw], cfg: cfg, integrity: raw[:integrity] || [] }
++      out = { rows: rows, raw: raw[:parts], apps: raw[:apps], cabs: raw[:cabs], hw: raw[:hw], cfg: cfg, integrity: raw[:integrity] || [], generation: generation }
+       out[:integrity] += Exposure.overlaps(model, only: use_selection ? raw[:cabs].map { |c| c[:pid] }.compact : nil)
+       runs = LedRun.detect(model, only: use_selection ? raw[:cabs].map { |c| c[:pid] }.compact : nil)
+       out[:led] = LedRun.summary(runs).merge('runs_full' => runs)
+@@ -261,6 +275,36 @@
+       out
+     end
+ 
++    # ---- 1.28.67 grain policy -------------------------------------------------
++    # Rotation on the saw is only legal when the board has no grain to line up.
++    # The old rule was a two-entry manual map (cfg['grain_lock'] = front/top), so a
++    # wood-veneer carcass was free to rotate and the grain ran across the part.
++    #
++    # Order of authority:
++    #   1. an explicit cfg['grain_lock'] entry always wins (true = never rotate);
++    #   2. wood / textured swatches keep their grain and never rotate;
++    #   3. solid / plain boards (no texture) rotate freely.
++    def grain_free?(mat, mat_code = nil)
++      base = mat.to_s.split('@').first
++      code = mat_code.to_s
++      code = mat.to_s.split('@').last if code.empty? && mat.to_s.include?('@')
++      return true if %w[back drawer plinth].include?(base) && code.empty? # solid back / drawer boards
++
++      sw = code.empty? ? nil : Catalog.swatch(%w[top splash].include?(base) ? base : 'front', code)
++      return false if sw && (sw['cat'].to_s == 'Wood' || sw['tex'].to_s.include?('/wood/'))
++
++      true
++    rescue StandardError
++      false
++    end
++
++    def rotatable?(row, mat, lock)
++      return false if lock[mat] == true # explicit project lock
++      return true if lock[mat] == false # explicit project unlock
++
++      grain_free?(mat, row[:mat_code])
++    end
++
+     # Nesting per sheet material (top/glass/splash are priced by net area). Items are labelled with part IDs.
+     def nest_all(parts, cfg)
+       lock = cfg['grain_lock'] || {}
+@@ -273,7 +317,7 @@
+           key = [r[:part], r[:len], r[:wid]]
+           colors[key] ||= colors.size + 1
+           cl, cw = cut_size(r) # the sheet is nested with the RAW cut size (finished size minus thick edge banding)
+-          { id: (r[:pid] || (i + 1)).to_s, l: cl, w: cw, fin_l: r[:len], fin_w: r[:wid], rot: !lock[mat], part: r[:part], color: colors[key], code: r[:code], groove: r[:groove], groove_geo: r[:groove_geo],
++          { id: (r[:pid] || (i + 1)).to_s, l: cl, w: cw, fin_l: r[:len], fin_w: r[:wid], rot: rotatable?(r, mat, lock), part: r[:part], color: colors[key], code: r[:code], groove: r[:groove], groove_geo: r[:groove_geo],
+             bore: r[:bore], back_groove: r[:back_groove], la: r[:la], notch: r[:notch], thk: r[:thk], eb_l: r[:eb_l], eb_w: r[:eb_w], eb_t: r[:eb_t], notes: r[:notes] }
+         end
+         dims = Config.stock_dimensions(cfg, mat, thk)
+--- a/egc_builder/wardrobe.rb
++++ b/egc_builder/wardrobe.rb
+@@ -128,8 +128,17 @@
+       def interior_sections
+         secs = (@p['sections'] || []).map(&:dup)
+         secs = Wardrobe.auto_sections(@w, @c) if secs.empty?
++        # 1.28.67: a doorless dressing unit is built from its carcass alone, and a
++        # params hash with no sections could leave this empty - the old code then
++        # indexed secs[-1] (nil) and raised NoMethodError: undefined method '[]='
++        # for nil. Fall back to the inner gable-to-gable width instead.
++        if secs.empty?
++          inner = [@w - 2 * @t, 100].max
++          return [{ 't' => 'hanging', 'w' => inner }]
++        end
+         avail = @w - 2 * @t - (secs.size - 1) * @t
+         sum = EGC::Num.sum(secs[0...-1]) { |s| s['w'].to_f }
++        secs[-1] = (secs[-1] || {}) # never index into nil
+         secs[-1]['w'] = [avail - sum, 100].max
+         secs
+       end
+--- a/egc_builder/space_tool.rb
++++ b/egc_builder/space_tool.rb
+@@ -76,6 +76,13 @@
+     def void_at(unit, x, d, z, list = nil)
+       bs = list || boards(unit)
+       sides = bs.select { |b| %w[side_l side_r].include?(b[:n]) }
++      if sides.empty?
++        # 1.28.67: DOOR-FREE cavity. A dressing unit built with doors: 'none' has
++        # no front panels to reference; the cavity comes from the carcass shell
++        # alone (gables, top, deck, back). Never return nil just because no
++        # gable group matched a name - derive the shell from every board.
++        sides = bs.reject { |b| %w[door drawer_front flap].include?(b[:n]) }
++      end
+       return nil if sides.empty?
+ 
+       cw0 = sides.map { |b| b[:x0] }.min
+@@ -163,9 +170,20 @@
+     end
+ 
+     # the additions of a unit: spec[:extras] of a cabinet, params['extras'] of a wardrobe of the dressing designer
++    # 1.28.67: an open (doorless) wardrobe stores no door data at all, and a unit
++    # whose params were never written (or hold 'null') made JSON.parse raise
++    # JSON::ParserError / NoMethodError on nil['extras']. Read the additions
++    # defensively so a doorless dressing unit can always be filled.
+     def extras_of(unit)
+       if ward?(unit)
+-        Array(JSON.parse(unit.get_attribute(ATTR, 'params').to_s)['extras']).map { |e| e.transform_keys(&:to_sym) }
++        prm = begin
++          raw = unit.get_attribute(ATTR, 'params')
++          h = raw.is_a?(String) && !raw.strip.empty? ? JSON.parse(raw) : raw
++          h.is_a?(Hash) ? h : {}
++        rescue JSON::ParserError, TypeError
++          {}
++        end
++        Array(prm['extras']).map { |e| e.is_a?(Hash) ? e.transform_keys(&:to_sym) : e }
+       else
+         spec = Cabinet.spec_from_json(unit.get_attribute(ATTR, 'spec'))
+         raise 'this unit has a mechanism: its interior is fixed' if spec[:mech]

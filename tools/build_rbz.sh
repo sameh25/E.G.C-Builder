@@ -1,90 +1,45 @@
 #!/usr/bin/env bash
+# Build E.G.C Builder .rbz from the authentic flat plugin tree.
 #
-# Builds E.G.C_Builder_1.28.67.rbz with a FLAT root layout.
+# Source:  work/            egc_builder.rb  +  egc_builder/   (flat, one directory)
+# Output:  release/E.G.C_Builder_<version>.rbz
 #
-# REQUIRED ARCHIVE STRUCTURE (SketchUp Extension Manager extracts literally):
-#
-#   EGC_Builder.rb          <- root loader, registers 'EGC_Builder/main'
-#   EGC_Builder/            <- exactly ONE top-level directory
-#     loader.rb
-#     main.rb
-#     materials.json
-#     core/ model/ ops/ ui/ assets/
-#
-# HISTORY / WHY THIS FILE WAS REWRITTEN
-# -------------------------------------
-# The previous script did:
-#
-#     STAGE="$ROOT/.stage/EGC_Builder"; mkdir -p "$STAGE"
-#     cp -r "$ROOT/src/EGC_Builder" "$STAGE/"      # <-- BUG
-#
-# Pre-creating $STAGE and then copying the source tree *into* it produced
-#     .stage/EGC_Builder/EGC_Builder/...
-# so the installed extension became
-#     Plugins/EGC_Builder/EGC_Builder/main.rb
-# while EGC_Builder.rb still asked for 'EGC_Builder/main'. SketchUp then failed
-# at boot with:  LoadError -- Could not find such file -- EGC_Builder/main
-#
-# The fix is to stage into a bare directory and let `cp -r` create the single
-# EGC_Builder directory itself, then assert the result before zipping.
-
+# The archive MUST extract to Plugins/egc_builder.rb and Plugins/egc_builder/.
+# That means the zip root holds exactly those two entries - no wrapping folder,
+# no nested egc_builder/egc_builder. Extension Manager extracts literally, and
+# egc_builder.rb registers 'egc_builder/main'.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-STAGE_ROOT="$ROOT/.stage"
-OUT="$ROOT/dist/E.G.C_Builder_1.28.67.rbz"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="$ROOT/work"
+OUT_DIR="$ROOT/release"
 
-echo "== E.G.C Builder package build =="
+[[ -f "$SRC/egc_builder.rb" ]]      || { echo "missing $SRC/egc_builder.rb" >&2; exit 1; }
+[[ -d "$SRC/egc_builder" ]]         || { echo "missing $SRC/egc_builder/" >&2; exit 1; }
+[[ -d "$SRC/egc_builder/assets" ]]  || { echo "missing $SRC/egc_builder/assets/" >&2; exit 1; }
+[[ -f "$SRC/egc_builder/main.rb" ]] || { echo "missing $SRC/egc_builder/main.rb" >&2; exit 1; }
 
-rm -rf "$STAGE_ROOT"
-mkdir -p "$STAGE_ROOT" "$ROOT/dist"
+VERSION="$(sed -n "s/.*PLUGIN_VERSION *= *'\([^']*\)'.*/\1/p" "$SRC/egc_builder.rb" | head -1)"
+[[ -n "$VERSION" ]] || { echo "cannot read PLUGIN_VERSION" >&2; exit 1; }
 
-# Root loader script sits beside (not inside) the extension directory.
-cp "$ROOT/src/EGC_Builder.rb" "$STAGE_ROOT/EGC_Builder.rb"
+echo "==> syntax check"
+fail=0
+while IFS= read -r -d '' f; do
+  ruby -c "$f" >/dev/null 2>&1 || { echo "   SYNTAX FAIL: $f" >&2; fail=1; }
+done < <(find "$SRC" -name '*.rb' -print0)
+[[ $fail -eq 0 ]] || { echo "aborting: syntax errors" >&2; exit 1; }
+echo "    all $(find "$SRC" -name '*.rb' | wc -l) modules OK"
 
-# NOTE: do NOT pre-create $STAGE_ROOT/EGC_Builder. Copying the source tree into
-# a bare directory creates exactly one EGC_Builder level.
-cp -r "$ROOT/src/EGC_Builder" "$STAGE_ROOT/EGC_Builder"
+mkdir -p "$OUT_DIR"
+ARTIFACT="$OUT_DIR/E.G.C_Builder_${VERSION}.rbz"
+rm -f "$ARTIFACT"
 
-# Runtime docs + the in-SketchUp test suite ship inside the extension dir.
-cp "$ROOT/docs/AUDIT_REPORT_1.28.67.md"      "$STAGE_ROOT/EGC_Builder/"
-cp "$ROOT/test/sketchup_console_tests.rb"    "$STAGE_ROOT/EGC_Builder/"
+echo "==> packaging $VERSION"
+# -X drops extra file attributes so the archive is reproducible.
+(cd "$SRC" && zip -rqX "$ARTIFACT" egc_builder.rb egc_builder)
 
-# ---- structural guard: fail the build, never ship a nested archive --------
-# -mindepth 1 is essential: without it `find` reports its own starting point
-# (the legitimate .../EGC_Builder) and every build would abort.
-NESTED="$(find "$STAGE_ROOT/EGC_Builder" -mindepth 1 -type d -name 'EGC_Builder' | head -5)"
-if [ -n "$NESTED" ]; then
-  echo "FATAL: nested EGC_Builder directory detected:" >&2
-  echo "$NESTED" >&2
-  exit 1
-fi
+echo "==> built $ARTIFACT"
+ls -l "$ARTIFACT"
+sha256sum "$ARTIFACT"
 
-for req in loader.rb main.rb materials.json core model ops ui assets; do
-  if [ ! -e "$STAGE_ROOT/EGC_Builder/$req" ]; then
-    echo "FATAL: missing required path EGC_Builder/$req" >&2
-    exit 1
-  fi
-done
-
-if [ ! -f "$STAGE_ROOT/EGC_Builder/ui/ui.html" ]; then
-  echo "FATAL: missing EGC_Builder/ui/ui.html" >&2
-  exit 1
-fi
-
-# ---- syntax check every shipped .rb -------------------------------------
-find "$STAGE_ROOT" -name '*.rb' -print0 | while IFS= read -r -d '' f; do
-  ruby -c "$f" >/dev/null || { echo "FATAL: syntax error in ${f#$STAGE_ROOT/}" >&2; exit 1; }
-done
-echo "syntax OK"
-
-# ---- zip -----------------------------------------------------------------
-cd "$STAGE_ROOT"
-rm -f "$OUT"
-# -X strips extra file attributes; the two arguments are the ONLY root entries.
-zip -rqX "$OUT" EGC_Builder.rb EGC_Builder
-
-echo "built $OUT"
-
-# ---- post-build verification --------------------------------------------
-"$ROOT/tools/verify_package.sh" "$OUT"
+"$ROOT/tools/verify_package.sh" "$ARTIFACT"

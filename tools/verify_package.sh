@@ -1,80 +1,51 @@
 #!/usr/bin/env bash
-#
-# Verifies a packaged .rbz has the exact flat layout SketchUp requires.
-#
-# Checks:
-#   1. root contains EGC_Builder.rb
-#   2. root contains exactly one EGC_Builder/ directory
-#   3. NO nested EGC_Builder/EGC_Builder path anywhere
-#   4. required runtime files and directories are present
-#   5. every .rb entry parses
-#   6. the registered extension path 'EGC_Builder/main' resolves inside the zip
-#
-# Exit 0 = installable, 1 = broken.
+# Structural verification of a built E.G.C Builder .rbz.
+# Usage: tools/verify_package.sh release/E.G.C_Builder_1.28.67.rbz
+set -euo pipefail
 
-set -uo pipefail
-PKG="${1:?usage: verify_package.sh <file.rbz>}"
-FAIL=0
+ARTIFACT="${1:-}"
+[[ -n "$ARTIFACT" && -f "$ARTIFACT" ]] || { echo "usage: $0 <file.rbz>" >&2; exit 1; }
 
-note() { printf '  %s\n' "$1"; }
-ok()   { printf '  OK    %s\n' "$1"; }
-bad()  { printf '  FAIL  %s\n' "$1"; FAIL=1; }
+pass=0; fail=0
+ok()   { echo "  PASS  $*"; pass=$((pass+1)); }
+bad()  { echo "  FAIL  $*"; fail=$((fail+1)); }
 
-echo "== verifying $PKG =="
-[ -f "$PKG" ] || { echo "no such file"; exit 1; }
-unzip -tqq "$PKG" >/dev/null || { echo "corrupt zip"; exit 1; }
+echo "==> $ARTIFACT"
 
-LIST="$(unzip -Z1 "$PKG")"
+unzip -tq "$ARTIFACT" >/dev/null 2>&1 && ok "zip integrity" || bad "zip integrity"
 
-# 1. root loader
-if printf '%s\n' "$LIST" | grep -qx 'EGC_Builder.rb'; then
-  ok "root EGC_Builder.rb present"
-else
-  bad "root EGC_Builder.rb missing"
-fi
+entries="$(unzip -Z1 "$ARTIFACT")"
+total="$(printf '%s\n' "$entries" | wc -l)"
+echo "  info  $total entries"
 
-# 2. exactly one top-level directory
-TOPDIRS="$(printf '%s\n' "$LIST" | awk -F/ 'NF>1{print $1}' | sort -u)"
-if [ "$TOPDIRS" = "EGC_Builder" ]; then
-  ok "exactly one top-level directory (EGC_Builder)"
-else
-  bad "unexpected top-level entries: $(echo "$TOPDIRS" | tr '\n' ' ')"
-fi
+# Root must hold exactly egc_builder.rb and egc_builder/
+roots="$(printf '%s\n' "$entries" | awk -F/ '{print $1}' | sort -u)"
+[[ "$roots" == "$(printf 'egc_builder\negc_builder.rb')" ]] && ok "root is egc_builder.rb + egc_builder/" \
+  || bad "unexpected root entries: $(echo "$roots" | tr '\n' ' ')"
 
-# 3. no nesting
-if printf '%s\n' "$LIST" | grep -q '^EGC_Builder/EGC_Builder/'; then
-  bad "nested EGC_Builder/EGC_Builder detected (the original startup bug)"
-else
-  ok "no nested EGC_Builder directory"
-fi
+nested="$(printf '%s\n' "$entries" | grep -c '^egc_builder/egc_builder/' || true)"
+[[ "$nested" -eq 0 ]] && ok "no nested egc_builder/egc_builder" || bad "$nested nested entries"
 
-# 4. required runtime paths
-for req in EGC_Builder/main.rb EGC_Builder/loader.rb EGC_Builder/materials.json \
-           EGC_Builder/ui/ui.html EGC_Builder/core/ EGC_Builder/model/ \
-           EGC_Builder/ops/ EGC_Builder/ui/ EGC_Builder/assets/; do
-  if printf '%s\n' "$LIST" | grep -qx -- "$req"; then
-    ok "$req"
-  else
-    bad "missing $req"
-  fi
- done
+printf '%s\n' "$entries" | grep -qx 'egc_builder/main.rb' \
+  && ok "egc_builder/main.rb present (registered path resolves)" \
+  || bad "egc_builder/main.rb missing"
 
-# 5. ruby syntax of every shipped file
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-unzip -qq "$PKG" -d "$TMP"
-SYNTAX_BAD=0
-while IFS= read -r -d '' f; do
-  ruby -c "$f" >/dev/null 2>&1 || { bad "syntax error: ${f#$TMP/}"; SYNTAX_BAD=1; }
-done < <(find "$TMP" -name '*.rb' -print0)
-[ "$SYNTAX_BAD" -eq 0 ] && ok "all .rb files parse"
+ver="$(unzip -p "$ARTIFACT" egc_builder.rb | sed -n "s/.*PLUGIN_VERSION *= *'\([^']*\)'.*/\1/p" | head -1)"
+[[ -n "$ver" ]] && ok "PLUGIN_VERSION = $ver" || bad "PLUGIN_VERSION unreadable"
 
-# 6. the exact path SketchUp registers must exist after extraction
-if [ -f "$TMP/EGC_Builder/main.rb" ]; then
-  ok "SketchUp 'EGC_Builder/main' resolves after extraction"
-else
-  bad "SketchUp 'EGC_Builder/main' would NOT resolve"
-fi
+# 1.28.67 countertop guard must survive into the package, not just the work tree.
+guards="$(unzip -p "$ARTIFACT" egc_builder/kitchen.rb | grep -c 'TALL_VOTE_MM' || true)"
+[[ "$guards" -gt 0 ]] && ok "countertop guard present in packaged kitchen.rb" \
+  || bad "countertop guard missing from package"
+
+printf '%s\n' "$entries" | grep -q "^egc_builder/assets/" \
+  && ok "assets/ bundled" || bad "assets/ missing"
+
+echo "  info  assets: $(printf '%s\n' "$entries" | grep -ci '\.png$' || true) PNG / $(printf '%s\n' "$entries" | grep -ci '\.jpg$' || true) JPG / $(printf '%s\n' "$entries" | grep -ci '\.svg$' || true) SVG"
 
 echo
-if [ "$FAIL" -eq 0 ]; then echo "RESULT: installable"; else echo "RESULT: BROKEN"; fi
-exit "$FAIL"
+if [[ $fail -gt 0 ]]; then
+  echo "RESULT: $fail failed, $pass passed"
+  exit 1
+fi
+echo "RESULT: all $pass checks passed"
