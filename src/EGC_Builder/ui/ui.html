@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>E.G.C Builder</title>
+<link rel="stylesheet" href="ui.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <img src="../assets/icon.svg" alt="" class="logo">
+    <div>
+      <h1>E.G.C Builder</h1>
+      <p class="ver">v<span id="version">1.28.67</span> &middot; <span id="tagline">Cabinet &amp; joinery production</span></p>
+    </div>
+  </div>
+  <div class="actions">
+    <button id="btn-audit" class="primary">Run Audit</button>
+    <button id="btn-cutlist">Cutlist</button>
+    <button id="btn-nest">Nest</button>
+    <button id="btn-worktop">Worktops</button>
+  </div>
+</header>
+
+<main>
+  <section class="cards" id="cards">
+    <article class="card"><h2>Contract</h2><p class="big" id="stat-contract">&mdash;</p><small id="stat-fingerprint">verifying&hellip;</small></article>
+    <article class="card"><h2>Cabinets</h2><p class="big" id="stat-cabinets">0</p><small>placed units</small></article>
+    <article class="card"><h2>Parts</h2><p class="big" id="stat-parts">0</p><small>machined panels</small></article>
+    <article class="card"><h2>Counter top</h2><p class="big" id="stat-plane">&mdash;</p><small>clamped plane</small></article>
+  </section>
+
+  <section class="panel">
+    <h2>System audit</h2>
+    <ul class="checks" id="checks">
+      <li class="muted">Press <strong>Run Audit</strong> to verify every module.</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>Output</h2>
+    <pre id="output" class="log">Ready.</pre>
+  </section>
+</main>
+
+<footer class="bar foot">
+  <span id="status">Idle</span>
+  <span class="spacer"></span>
+  <span class="hint">Kerf 4.4&nbsp;mm &middot; Trim 10.0&nbsp;mm &middot; Counter 900&nbsp;mm &middot; Tall &gt; 1100&nbsp;mm</span>
+</footer>
+
+<script src="ui.js"></script>
+</body>
+</html>

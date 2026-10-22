@@ -1,0 +1,107 @@
+/* E.G.C Builder dialog styling - deliberately dependency-free so the dialog
+   renders identically inside SketchUp's CEF and in a normal browser. */
+
+:root {
+  --bg: #1e2126;
+  --panel: #272b31;
+  --line: #3a4047;
+  --text: #e6e9ed;
+  --muted: #9aa4b0;
+  --accent: #4ea1d3;
+  --ok: #4caf7d;
+  --bad: #e05c5c;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 13px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.foot { border-bottom: 0; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.spacer { flex: 1; }
+.hint { font-variant-numeric: tabular-nums; }
+
+.brand { display: flex; align-items: center; gap: 10px; }
+.logo { width: 30px; height: 30px; }
+h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+.ver { margin: 0; font-size: 11px; color: var(--muted); }
+
+.actions { margin-left: auto; display: flex; gap: 6px; }
+
+button {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: #31363d;
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover { background: #3a4048; }
+button:active { transform: translateY(1px); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #08222f; font-weight: 600; }
+button.primary:hover { filter: brightness(1.08); }
+
+main { padding: 14px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px 12px;
+}
+.card h2 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 600; }
+.card .big { margin: 0; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.card small { color: var(--muted); font-size: 11px; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px 12px;
+}
+.panel h2 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 600; }
+
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+.checks li:last-child { border-bottom: 0; }
+.checks .mark { font-weight: 700; width: 42px; flex: 0 0 42px; }
+.checks .mark.ok { color: var(--ok); }
+.checks .mark.bad { color: var(--bad); }
+.checks .name { flex: 0 0 260px; }
+.checks .detail { color: var(--muted); font-size: 12px; }
+.checks .muted { color: var(--muted); display: block; }
+
+.log {
+  margin: 0;
+  max-height: 190px;
+  overflow: auto;
+  background: #14171a;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 8px 10px;
+  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  white-space: pre-wrap;
+  color: #c8d2dc;
+}
+
+.err { color: var(--bad); }
+.good { color: var(--ok); }

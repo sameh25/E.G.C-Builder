@@ -17,6 +17,7 @@ require 'EGC_Builder/loader'
 require_relative 'suites/core_suites'
 require_relative 'suites/model_suites'
 require_relative 'suites/ops_suites'
+require_relative 'suites/ui_suites'
 
 module EGC
   module Test

@@ -42,7 +42,8 @@ module EGC
     'ops/audit',
     'core/aliases',
     'ui/menu',
-    'ui/commands'
+    'ui/commands',
+    'ui/dialog'
   ].freeze
 
   def self.load_all!

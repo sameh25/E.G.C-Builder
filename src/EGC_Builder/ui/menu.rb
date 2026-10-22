@@ -19,6 +19,8 @@ module EGC
       # assert the command surface without a SketchUp host.
       def items
         [
+          { :id => 'egc_dialog',           :label => 'Open Panel…',           :command => :open_dialog },
+          { :separator => true },
           { :id => 'egc_audit',            :label => 'System Audit',          :command => :run_audit },
           { :id => 'egc_worktop',          :label => 'Generate Worktops',     :command => :generate_worktops },
           { :id => 'egc_cutlist',          :label => 'Export Cutlist CSV',    :command => :export_cutlist },

@@ -29,6 +29,7 @@ module EGC
       def dispatch(command, doc = nil, opts = {})
         doc ||= default_document
         case command.to_sym
+        when :open_dialog         then open_dialog(doc, opts)
         when :run_audit          then run_audit(doc, opts)
         when :generate_worktops  then generate_worktops(doc, opts)
         when :export_cutlist     then export_cutlist(doc, opts)
@@ -43,6 +44,16 @@ module EGC
       end
 
       # ---- commands -------------------------------------------------------
+      # Opens the HtmlDialog panel (ui/ui.html). Headless runs get a status
+      # hash instead of a window so the packaging test can still assert that
+      # every referenced asset resolved.
+      def open_dialog(doc, opts = {})
+        res = EGC::UI::Dialog.show(opts[:title], opts)
+        res.merge(:stats => EGC::UI::Dialog.stats_for(doc),
+                  :assets => EGC::UI::Dialog.assets,
+                  :command => :open_dialog)
+      end
+
       def run_audit(doc, _opts = {})
         EGC::Ops::Audit.run(doc)
       end

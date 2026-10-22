@@ -148,9 +148,9 @@ in-SketchUp Test 4 (zero nil errors, all five insertions succeed, gable front ed
 
 ## 5. System-wide regression & package
 
-* **30 modules** load in dependency order; `Audit.check_modules_loaded` verifies each
+* **31 modules** load in dependency order; `Audit.check_modules_loaded` verifies each
   manifest entry exists on disk *and* was actually required.
-* **22 suites / 137 tests** headless, **0 failures**.
+* **25 suites / 156 tests** headless, **0 failures**.
 * **45 checks** in the SketchUp-console suite, **0 failures**.
 * Auxiliary tools (`interference`, `corner`, `appliances`, `snap`, `space_tool`) are
   wrapped in a log-audit gate that asserts **zero** warning records.
@@ -171,16 +171,105 @@ in-SketchUp Test 4 (zero nil errors, all five insertions succeed, gable front ed
 ```
 EGC_Builder.rb                     extension registration
 EGC_Builder/main.rb                deferred bootstrap + integrity gate
-EGC_Builder/loader.rb              dependency-ordered manifest
+EGC_Builder/loader.rb              dependency-ordered manifest (31 modules)
 EGC_Builder/materials.json         material data (has_grain drives rotation)
 EGC_Builder/core/                  version errors units logger geom constants scene aliases
 EGC_Builder/model/                 materials edgeband part hardware carcass doors cabinet wardrobe
 EGC_Builder/ops/                   production_sync cutlist cam nesting exec_worktop
                                    assistant_edit space_tool interference corner appliances snap audit
-EGC_Builder/ui/                    menu commands
+EGC_Builder/ui/                    menu commands dialog + ui.html ui.css ui.js
+EGC_Builder/assets/                icon.svg
 EGC_Builder/sketchup_console_tests.rb   in-SketchUp verification suite
 EGC_Builder/AUDIT_REPORT_1.28.67.md     this report
 ```
+
+## 6. Packaging repair — the v1.28.67 startup `LoadError` (post-mortem)
+
+### Symptom
+
+```text
+Error: LoadError (Could not find such file -- EGC_Builder/main)
+  .../SketchUp 2026/SketchUp/Plugins/EGC_Builder.rb:24:in 'register_extension'
+```
+
+The engine was healthy; the **archive** was wrong. Every functional suite passed
+against `src/`, which is exactly why the defect escaped: the tests never looked
+at the built `.rbz`.
+
+### Root cause
+
+`tools/build_rbz.sh` staged the payload like this:
+
+```bash
+STAGE="$ROOT/.stage/EGC_Builder"; mkdir -p "$STAGE"   # creates …/EGC_Builder
+cp -r "$ROOT/src/EGC_Builder" "$STAGE/"               # copies INTO it
+```
+
+`cp -r src/EGC_Builder` into an existing directory named `EGC_Builder` produced
+`.stage/EGC_Builder/EGC_Builder/…`. The resulting archive held 38 nested
+entries, so Extension Manager extracted:
+
+```text
+Plugins/EGC_Builder.rb
+Plugins/EGC_Builder/EGC_Builder/main.rb     <- one level too deep
+```
+
+`EGC_Builder.rb` registers `'EGC_Builder/main'`, which resolves relative to
+`Plugins/`. That file did not exist there, so `register_extension` raised
+`LoadError` at boot.
+
+### Fix
+
+Staging now copies the source tree into a **bare** directory so `cp -r` creates
+the single `EGC_Builder` level itself, and the build asserts the result before
+zipping:
+
+* `find … -mindepth 1 -name EGC_Builder` — aborts on any nested directory
+  (`-mindepth 1` is essential; without it `find` matches its own start path and
+  every build aborts).
+* presence assertions for `loader.rb`, `main.rb`, `materials.json`, `core/`,
+  `model/`, `ops/`, `ui/`, `assets/` and `ui/ui.html`.
+* `ruby -c` over every shipped `.rb`.
+* `tools/verify_package.sh` re-opens the finished archive and proves
+  `EGC_Builder/main.rb` resolves after extraction.
+
+### Canonical archive layout (enforced)
+
+```text
+EGC_Builder.rb
+EGC_Builder/
+  loader.rb  main.rb  materials.json
+  core/  model/  ops/  ui/  assets/
+```
+
+Two root entries only. `EGC_Builder/EGC_Builder/…` must never appear.
+
+### Guard against recurrence
+
+Because the functional suites cannot see the archive, three suites were added
+(now **25 suites / 156 tests**): `ui/dialog`, `ui/commands` and `package/layout`.
+They assert that every referenced dialog asset exists, that every menu command
+has a dispatch handler, that `src/` holds exactly one extension directory, that
+no nested `EGC_Builder` exists anywhere, and that the dimensional fingerprint is
+still `0a4c347975b826b4…`.
+
+`test/sketchup_console_tests.rb` also had a latent false-pass: its final line was
+guarded by `if defined?(Sketchup)`, so a plain-Ruby run executed **zero** checks
+and still exited 0. It now bootstraps the engine headless and gates on
+`defined?(EGC::ConsoleTests)`, so the 45 checks genuinely run in both hosts.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| Nested `EGC_Builder/EGC_Builder` entries | **0** (was 38) |
+| Root entries | `EGC_Builder.rb`, `EGC_Builder` |
+| Entries in archive | 47 |
+| `Plugins/EGC_Builder/main.rb` after extraction | exists |
+| Boot from extracted package | `BOOT OK v1.28.67`, 31 modules |
+| Headless regression | 25 suites, 156 tests, 0 failed |
+| Console suite | 45 checks, 0 failed |
+| Fingerprint | `0a4c347975b826b4…` (68 values, unchanged) |
 
 ## How to verify after installing
 

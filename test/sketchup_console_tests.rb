@@ -21,6 +21,32 @@ rescue LoadError
   # dependency, so the suite still exercises the real code paths.
 end
 
+# ---------------------------------------------------------------------------
+# Headless bootstrap.
+#
+# Inside SketchUp the engine is already loaded by main.rb, so this is skipped.
+# In a plain Ruby process it is REQUIRED: without it the `defined?(Sketchup)`
+# guard at the bottom of this file is false, run_all never runs, and the
+# process exits 0 having asserted nothing -- a silent false pass. Load the
+# engine instead so the suite genuinely executes.
+# ---------------------------------------------------------------------------
+unless defined?(EGC::VERSION)
+  if File.exist?(File.expand_path('../harness/sketchup_stub.rb', __dir__))
+    # Plain-Ruby run: pull in the headless SketchUp API stand-in (it also puts
+    # src/ on the load path). Skipped inside a real SketchUp install.
+    require_relative '../harness/sketchup_stub'
+  end
+  begin
+    require_relative '../src/EGC_Builder/loader'
+  rescue LoadError
+    begin
+      require 'EGC_Builder/loader'
+    rescue LoadError
+      warn '[EGC] console suite could not load the engine; it would assert nothing.'
+    end
+  end
+end
+
 module EGC
   module ConsoleTests
     module_function
@@ -360,4 +386,8 @@ module EGC
   end
 end
 
-EGC::ConsoleTests.run_all if defined?(Sketchup)
+# Run when the engine is available -- inside SketchUp it always is, and in a
+# plain Ruby process the headless bootstrap above loads it. Gating on
+# `defined?(Sketchup)` instead would make a headless run assert nothing and
+# still exit 0, hiding real regressions.
+EGC::ConsoleTests.run_all if defined?(EGC::ConsoleTests)
