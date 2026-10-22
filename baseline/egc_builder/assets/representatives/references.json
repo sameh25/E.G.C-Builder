@@ -1,0 +1,110 @@
+{
+  "version": "1.19.0",
+  "geometry": "Original procedural EGC geometry bundled in representatives.rb. No external SKP dependency.",
+  "installation_references": [
+    {
+      "part": "hinge",
+      "url": "https://www.blum.com/us/en/products/hingesystems/clip-top-blumotion/assembly/",
+      "used": "35 mm cup, 13 mm drilling depth; cup, articulated arm and fixed plate construction",
+      "limit": "Generic two-link visual mechanism using existing EGC 90 degree door travel; not a certified Blum replica or a manufacturer link-length specification."
+    },
+    {
+      "part": "runner",
+      "url": "https://hs-europe.accuride.com/hubfs/Datasheets/3832_en.pdf",
+      "used": "12.7 mm side clearance, 45.7 mm outer height; nested fixed/intermediate/inner stages"
+    },
+    {
+      "part": "runner installation",
+      "url": "https://hs-europe.accuride.com/hubfs/InstallationGuides/3832.pdf",
+      "used": "Cabinet-fixed outer slide and carriage-mounted inner slide; generic full travel equal to nominal runner length, intermediate stage half travel"
+    },
+    {
+      "part": "oven",
+      "url": "https://media3.bosch-home.com/Documents/specsheet/en-IN/HBA574BR0Z.pdf",
+      "used": "595 H x 594 W x 548 D appliance envelope, 558 mm body fits a 564 mm clear opening",
+      "limit": "Generic appearance and cavity; not branded Bosch CAD or a certified ventilation/installation specification."
+    },
+    {
+      "used": "Nested runners and release catches, generic geometry retaining existing drawer board dimensions.",
+      "url": "https://www.hettich.com/fileadmin/Media_Center/Catalogue/Quadro_for_wooden_drawers_1218__926435000.pdf",
+      "part": "concealed runners",
+      "limit": "Not a dimensionally exact Quadro IW21 replica."
+    },
+    {
+      "used": "Fixed mounting and telescopic arm structure. Outer tube and guide are now hollow.",
+      "url": "https://www.blum.com/us/en/products/liftsystems/aventos-hf-top/assembly/",
+      "part": "bifold lift",
+      "limit": "Existing generic fold path retained; not manufacturer-certified linkage."
+    },
+    {
+      "used": "Manufacturer product families, CAD and installation reference index; fixed carrier versus moving storage organization.",
+      "url": "https://www.kesseboehmer.us/services/downloads/download-area",
+      "part": "pantry, basket, corners, carousel",
+      "limit": "Several linked installation PDFs failed to open; no unverified numeric dimensions derived from them. New corner is generic pull-clear then swivel, not branded MagicCorner CAD."
+    },
+    {
+      "used": "Roller axis perpendicular to travel; fixed rail and moving wheel/guide construction.",
+      "url": "https://hta.hettich.com/en-de/sliding-door-systems/slideline-m",
+      "part": "sliding rollers",
+      "limit": "Existing top rail system preserved; not a bottom-running SlideLine M replica."
+    }
+  ],
+  "skp_review": [
+    {
+      "file": "aventos.skp",
+      "classification": "REFERENCE",
+      "inspection": "Loaded in SketchUp and rendered. 660 x 685.6 x 814.2 mm. Combined descending dish basket and lift-up front mechanism.",
+      "decision": "Retain as reference for a future lift mechanism. Does not supply the requested side-hinged cup assembly or sliding base basket."
+    },
+    {
+      "file": "6506 - @marigol_ar/#6506.skp",
+      "classification": "REFERENCE",
+      "inspection": "Loaded in SketchUp and rendered. Two separate gas hob models, combined bounds 1577.5 x 566 x 100.1 mm.",
+      "decision": "Retain for hob detail reference; neither model is an oven."
+    },
+    {
+      "file": "yasser apt dim 2.skp",
+      "classification": "REJECT",
+      "inspection": "197781512 bytes. Extracted and visually inspected its checksum-verified embedded 256 x 256 PNG preview: furnished bedroom plan. Full scene geometry not inspected.",
+      "decision": "Excluded from this three-component implementation; preview provides no suitable isolated hinge, sliding basket or oven. This is not a model-quality judgment."
+    },
+    {
+      "file": "Generated prior QA .skp files",
+      "classification": "REJECT",
+      "inspection": "Known generated test artifacts, not installation source assets.",
+      "decision": "Do not feed previous schematic output back as a source reference."
+    },
+    {
+      "file": "representatives.rb",
+      "classification": "USE",
+      "inspection": "Original parametric hinge, basket and oven geometry tested in SketchUp.",
+      "decision": "Bundled source is the portable geometry asset; models are generated locally without reference SKP files."
+    }
+  ],
+  "textures": [
+    {
+      "file": "wood.png",
+      "source": "Existing EGC procedural ASH01 texture",
+      "tile_mm": 900,
+      "catalog_code": "REPASH01"
+    },
+    {
+      "file": "metal.png",
+      "source": "Original procedural brushed metal",
+      "tile_mm": 120
+    },
+    {
+      "file": "glass.png",
+      "source": "Original procedural glass",
+      "tile_mm": 600,
+      "opacity": 0.32
+    },
+    {
+      "file": "plastic.png",
+      "source": "Original procedural plastic micrograin",
+      "tile_mm": 40
+    }
+  ],
+  "scope": "New builds/rebuilds: flat and shaker cabinet fronts >=16 mm with outer mounting sides; wardrobes mounted on actual side/divider boundaries; side and concealed runners including inner drawers; corner carriers, bored carousel hubs, lift tubes and wardrobe lift; sliding roller axes. Bevel/glass/notched and special internal hinges retain legacy construction unless handled by their own family builder.",
+  "validation_limit": "41 sampled poses check moving vertices against cabinet structural bounds. This is not exhaustive continuous solid collision detection, self-intersection certification, load testing, or manufacturing approval. Group#copy tests SketchUp shared-definition copy semantics, not physical Ctrl+Move keystrokes."
+}

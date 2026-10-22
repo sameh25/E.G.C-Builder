@@ -1,0 +1,14 @@
+Textures from ambientCG (https://ambientcg.com), licensed under the Creative Commons CC0 1.0 Universal License (public domain).
+Downloaded 2026-10-16, resized for E.G.C Builder. Credit is not required; it is given here for the record.
+
+assets/tex/wood/ACG049.jpg  - Wood049 (colour map, turned 90 degrees)
+assets/tex/wood/ACG051.jpg  - Wood051 (colour map, turned 90 degrees)
+assets/tex/wood/ACG092.jpg  - Wood092 (colour map)
+assets/tex/wood/ACG094.jpg  - Wood094 (colour map, turned 90 degrees)
+assets/tex/wood/ACG095.jpg  - Wood095 (colour map, turned 90 degrees)
+assets/tex/wood/ACG096.jpg  - Wood096 (colour map)
+assets/tex/dev/acg_m012_n.jpg, acg_m012_r.jpg - Metal012 (normal GL, roughness)
+assets/tex/dev/acg_m032_n.jpg, acg_m032_r.jpg - Metal032 (normal GL, roughness)
+assets/tex/dev/acg_m027_n.jpg, acg_m027_r.jpg, acg_powder.jpg - Metal027 (normal GL, roughness, colour)
+
+assets/tex/dev/washer_drum.jpg - washer drum photo supplied by the owner (Sameh), 2026-10-16.
